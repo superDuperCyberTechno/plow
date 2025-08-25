@@ -13,7 +13,7 @@ OUTPUT_FILE="${DOMAIN}_zonefile.txt"
 TEMP_FILE="/tmp/dns_check_$$"
 
 # Record types to check (CNAME first for optimization)
-RECORD_TYPES=("CNAME" "MX" "TXT" "A" "AAAA" "SRV" "NS")
+RECORD_TYPES=("CNAME" "A" "AAAA" "MX" "TXT" "SRV" "NS")
 
 # Function to query DNS records
 query_records() {
@@ -62,9 +62,12 @@ check_domain() {
     local is_subdomain="$2"
     local temp_file="$3"
 
+    echo -n "Checking $domain..."
+
     # First check for CNAME (optimization for subdomains)
     if has_cname "$domain"; then
         query_records "$domain" "CNAME" "$temp_file"
+        echo " [CNAME found]"
         return 0
     fi
 
@@ -74,39 +77,54 @@ check_domain() {
             query_records "$domain" "$type" "$temp_file"
         fi
     done
+    echo " [Done]"
 }
 
 # Main script
-{
-    # Check the main domain (always check all records)
-    check_domain "$DOMAIN" "0" "$TEMP_FILE"
+echo "Starting DNS check for $DOMAIN"
+echo "--------------------------------"
 
-    # Check subdomains from file
-    if [ -f "$SUBDOMAINS_FILE" ]; then
-        while IFS= read -r subdomain || [ -n "$subdomain" ]; do
-            # Skip empty lines and comments
-            if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
-                # Remove any trailing dot and whitespace
-                subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
-                full_domain="$subdomain.$DOMAIN"
+# Check the main domain (always check all records)
+check_domain "$DOMAIN" "0" "$TEMP_FILE"
 
-                # Check if this is a CNAME first
-                if ! has_cname "$full_domain"; then
-                    check_domain "$full_domain" "1" "$TEMP_FILE"
-                else
-                    # Only add CNAME record for subdomains
-                    query_records "$full_domain" "CNAME" "$TEMP_FILE"
-                fi
+# Check subdomains from file
+if [ -f "$SUBDOMAINS_FILE" ]; then
+    echo -e "\nChecking subdomains from $SUBDOMAINS_FILE"
+    echo "--------------------------------"
+
+    local sub_count=0
+    while IFS= read -r subdomain || [ -n "$subdomain" ]; do
+        # Skip empty lines and comments
+        if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
+            # Remove any trailing dot and whitespace
+            subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
+            full_domain="$subdomain.$DOMAIN"
+            ((sub_count++))
+
+            # Check if this is a CNAME first
+            if ! has_cname "$full_domain"; then
+                check_domain "$full_domain" "1" "$TEMP_FILE"
+            else
+                # Only add CNAME record for subdomains
+                echo -n "Checking $full_domain..."
+                query_records "$full_domain" "CNAME" "$TEMP_FILE"
+                echo " [CNAME found]"
             fi
-        done < "$SUBDOMAINS_FILE"
-    fi
-} > /dev/null
+        fi
+    done < "$SUBDOMAINS_FILE"
+
+    echo -e "\nChecked $sub_count subdomains"
+else
+    echo -e "\nNo subdomains file found at $SUBDOMAINS_FILE"
+fi
 
 # Process the temp file to remove duplicates and empty lines
+echo -e "\nProcessing results..."
 sort -u "$TEMP_FILE" | grep -v "^$" > "${TEMP_FILE}.processed"
 mv "${TEMP_FILE}.processed" "$TEMP_FILE"
 
 # Add zone file header
+echo -e "\nGenerating zone file..."
 {
     echo "; BIND zone file for $DOMAIN"
     echo "; Generated on $(date)"
@@ -125,5 +143,7 @@ mv "${TEMP_FILE}.processed" "$TEMP_FILE"
 # Clean up
 rm -f "$TEMP_FILE"
 
-echo "DNS records have been saved to $OUTPUT_FILE"
+echo -e "\nDNS records have been saved to $OUTPUT_FILE"
 echo "Note: Subdomains with CNAME records were not checked for other record types"
+
+
