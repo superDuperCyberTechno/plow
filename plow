@@ -118,7 +118,7 @@ check_domain "$DOMAIN" "0" "$TEMP_FILE"
 echo -e "\nChecking common subdomains"
 echo "--------------------------------"
 
-local common_sub_count=0
+common_sub_count=0
 for subdomain in "${COMMON_SUBDOMAINS[@]}"; do
     full_domain="$subdomain.$DOMAIN"
     ((common_sub_count++))
@@ -142,7 +142,7 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
     echo "--------------------------------"
 
     if [ -f "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
-        local file_sub_count=0
+        file_sub_count=0
         while IFS= read -r subdomain || [ -n "$subdomain" ]; do
             # Skip empty lines and comments
             if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
@@ -180,7 +180,7 @@ if [ "$#" -gt 0 ]; then
     echo -e "\nChecking additional subdomains from command line"
     echo "--------------------------------"
 
-    local arg_sub_count=0
+    arg_sub_count=0
     for subdomain in "$@"; do
         full_domain="$subdomain.$DOMAIN"
         ((arg_sub_count++))
