@@ -17,7 +17,6 @@ A bash script to check DNS records for a domain and its subdomains, outputting r
 
 ## Installation
 
-1. Save the script as `dns_check.sh`
-2. Make it executable:
    ```bash
-   chmod +x dns_check.sh
+   wget https://raw.githubusercontent.com/superDuperCyberTechno/plow/refs/heads/main/plow && chmod +x plow && sudo mv plow /usr/local/bin
+   ```
