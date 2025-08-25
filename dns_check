@@ -1,0 +1,129 @@
+#!/bin/bash
+
+# Check if domain and input file are provided
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <domain> <subdomains_file>"
+    echo "Example: $0 example.com subdomains.txt"
+    exit 1
+fi
+
+DOMAIN="$1"
+SUBDOMAINS_FILE="$2"
+OUTPUT_FILE="${DOMAIN}_zonefile.txt"
+TEMP_FILE="/tmp/dns_check_$$"
+
+# Record types to check (CNAME first for optimization)
+RECORD_TYPES=("CNAME" "MX" "TXT" "A" "AAAA" "SRV" "NS")
+
+# Function to query DNS records
+query_records() {
+    local domain="$1"
+    local record_type="$2"
+    local output_file="$3"
+
+    case "$record_type" in
+        "MX")
+            dig +short "$domain" "$record_type" | while read -r line; do
+                pref=$(echo "$line" | awk '{print $1}')
+                val=$(echo "$line" | awk '{print $2}')
+                echo "$domain. IN $record_type $pref $val" >> "$output_file"
+            done
+            ;;
+        "SRV")
+            dig +short "$domain" "$record_type" | while read -r line; do
+                echo "$domain. IN $record_type $line" >> "$output_file"
+            done
+            ;;
+        "TXT")
+            dig +short "$domain" "$record_type" | while read -r line; do
+                # Escape quotes in TXT records
+                line=$(echo "$line" | sed 's/"/\\"/g')
+                echo "$domain. IN $record_type \"$line\"" >> "$output_file"
+            done
+            ;;
+        *)
+            dig +short "$domain" "$record_type" | while read -r line; do
+                echo "$domain. IN $record_type $line" >> "$output_file"
+            done
+            ;;
+    esac
+}
+
+# Function to check if domain has CNAME
+has_cname() {
+    local domain="$1"
+    dig +short "$domain" "CNAME" | grep -q .
+    return $?
+}
+
+# Function to check all record types for a domain
+check_domain() {
+    local domain="$1"
+    local is_subdomain="$2"
+    local temp_file="$3"
+
+    # First check for CNAME (optimization for subdomains)
+    if has_cname "$domain"; then
+        query_records "$domain" "CNAME" "$temp_file"
+        return 0
+    fi
+
+    # If not a CNAME or is main domain, check all records
+    for type in "${RECORD_TYPES[@]}"; do
+        if [ "$type" != "CNAME" ] || [ "$is_subdomain" != "1" ]; then
+            query_records "$domain" "$type" "$temp_file"
+        fi
+    done
+}
+
+# Main script
+{
+    # Check the main domain (always check all records)
+    check_domain "$DOMAIN" "0" "$TEMP_FILE"
+
+    # Check subdomains from file
+    if [ -f "$SUBDOMAINS_FILE" ]; then
+        while IFS= read -r subdomain || [ -n "$subdomain" ]; do
+            # Skip empty lines and comments
+            if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
+                # Remove any trailing dot and whitespace
+                subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
+                full_domain="$subdomain.$DOMAIN"
+
+                # Check if this is a CNAME first
+                if ! has_cname "$full_domain"; then
+                    check_domain "$full_domain" "1" "$TEMP_FILE"
+                else
+                    # Only add CNAME record for subdomains
+                    query_records "$full_domain" "CNAME" "$TEMP_FILE"
+                fi
+            fi
+        done < "$SUBDOMAINS_FILE"
+    fi
+} > /dev/null
+
+# Process the temp file to remove duplicates and empty lines
+sort -u "$TEMP_FILE" | grep -v "^$" > "${TEMP_FILE}.processed"
+mv "${TEMP_FILE}.processed" "$TEMP_FILE"
+
+# Add zone file header
+{
+    echo "; BIND zone file for $DOMAIN"
+    echo "; Generated on $(date)"
+    echo "\$TTL 3600"
+    echo "@ IN SOA ns1.$DOMAIN. admin.$DOMAIN. ("
+    echo "    $(date +%Y%m%d%H) ; serial"
+    echo "    3600       ; refresh (1 hour)"
+    echo "    1800       ; retry (30 minutes)"
+    echo "    604800     ; expire (1 week)"
+    echo "    86400      ; minimum (1 day)"
+    echo "    )"
+    echo ""
+    cat "$TEMP_FILE"
+} > "$OUTPUT_FILE"
+
+# Clean up
+rm -f "$TEMP_FILE"
+
+echo "DNS records have been saved to $OUTPUT_FILE"
+echo "Note: Subdomains with CNAME records were not checked for other record types"
