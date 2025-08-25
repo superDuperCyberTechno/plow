@@ -1,14 +1,13 @@
 # Plow
 
-A bash script to check DNS records for a domain and its subdomains, outputting results in BIND zone file format.
+I was sick and tired of moving DNS records around manually when moving domains and name servers. I finally caved in and made this little tool. Feed this thing a domain and it will scrape all the DNS records and cram them into a BIND-valid zone file so you can simply import *that* without fiddling with all this crap.
 
 ## Features
 
-- Checks all common DNS record types: A, AAAA, MX, TXT, SRV, NS, and CNAME
-- Outputs results in BIND-compatible zone file format
+- Checks A, AAAA, MX, TXT, SRV, NS, and CNAME records
+- Outputs results in BIND-compatible zone file
 - Automatically checks 50+ common subdomains (including single letters and numbers)
-- Supports additional subdomains from file or command line
-- Optimized to skip unnecessary checks for CNAME records
+- Supports additional subdomains from file or the CLI directly
 
 ## Requirements
 
