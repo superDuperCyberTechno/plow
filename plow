@@ -1,15 +1,26 @@
 #!/bin/bash
 
 # Check if domain is provided
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-    echo "Usage: $0 <domain> [additional_subdomains_file]"
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <domain> [additional_subdomains...]"
+    echo "Usage: $0 <domain> [@subdomains_file] [additional_subdomains...]"
     echo "Example: $0 example.com"
-    echo "Example: $0 example.com additional_subdomains.txt"
+    echo "Example: $0 example.com @subdomains.txt"
+    echo "Example: $0 example.com api blog shop"
+    echo "Example: $0 example.com @subdomains.txt api blog"
     exit 1
 fi
 
 DOMAIN="$1"
-ADDITIONAL_SUBDOMAINS_FILE="${2:-}"
+shift  # Remove domain from arguments
+
+# Check if first argument is a file (starts with @)
+ADDITIONAL_SUBDOMAINS_FILE=""
+if [ "$#" -gt 0 ] && [[ "$1" == @* ]]; then
+    ADDITIONAL_SUBDOMAINS_FILE="${1:1}"  # Remove @ prefix
+    shift
+fi
+
 OUTPUT_FILE="${DOMAIN}_zonefile.txt"
 TEMP_FILE="/tmp/dns_check_$$"
 
@@ -131,14 +142,14 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
     echo "--------------------------------"
 
     if [ -f "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
-        local additional_sub_count=0
+        local file_sub_count=0
         while IFS= read -r subdomain || [ -n "$subdomain" ]; do
             # Skip empty lines and comments
             if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
                 # Remove any trailing dot and whitespace
                 subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
                 full_domain="$subdomain.$DOMAIN"
-                ((additional_sub_count++))
+                ((file_sub_count++))
 
                 # Skip if this is already in our common subdomains list
                 if printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
@@ -158,10 +169,40 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
             fi
         done < "$ADDITIONAL_SUBDOMAINS_FILE"
 
-        echo -e "\nChecked $additional_sub_count additional subdomains"
+        echo -e "\nChecked $file_sub_count additional subdomains from file"
     else
         echo "Additional subdomains file not found at $ADDITIONAL_SUBDOMAINS_FILE"
     fi
+fi
+
+# Check additional subdomains from command line arguments
+if [ "$#" -gt 0 ]; then
+    echo -e "\nChecking additional subdomains from command line"
+    echo "--------------------------------"
+
+    local arg_sub_count=0
+    for subdomain in "$@"; do
+        full_domain="$subdomain.$DOMAIN"
+        ((arg_sub_count++))
+
+        # Skip if this is already in our common subdomains list
+        if printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
+            echo "Skipping $full_domain (already in common subdomains list)"
+            continue
+        fi
+
+        # Check if this is a CNAME first
+        if ! has_cname "$full_domain"; then
+            check_domain "$full_domain" "1" "$TEMP_FILE"
+        else
+            # Only add CNAME record for subdomains
+            echo -n "Checking $full_domain..."
+            query_records "$full_domain" "CNAME" "$TEMP_FILE"
+            echo " [CNAME found]"
+        fi
+    done
+
+    echo -e "\nChecked $arg_sub_count additional subdomains from command line"
 fi
 
 # Process the temp file to remove duplicates and empty lines
