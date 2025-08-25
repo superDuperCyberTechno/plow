@@ -23,24 +23,24 @@ fi
 
 OUTPUT_FILE="${DOMAIN}_zonefile.txt"
 TEMP_FILE="/tmp/dns_check_$$"
+SUBDOMAINS_URL="https://raw.githubusercontent.com/superDuperCyberTechno/plow/refs/heads/main/common_subdomains.txt"
 
 # Record types to check (CNAME first for optimization)
 RECORD_TYPES=("CNAME" "MX" "TXT" "A" "AAAA" "SRV" "NS")
 
-# Hardcoded list of common subdomains (including single letters and numbers)
-COMMON_SUBDOMAINS=(
-    # Single letters
-    "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
-    # Single numbers
-    "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
-    # Common subdomains
-    "www" "mail" "ftp" "webmail" "smtp" "pop" "imap" "ns1" "ns2"
-    "ns3" "ns4" "blog" "shop" "app" "api" "dev" "test" "staging"
-    "static" "cdn" "assets" "media" "docs" "support" "forum" "help"
-    "status" "secure" "account" "my" "portal" "admin" "dashboard" "downloads"
-    "uploads" "images" "video" "audio" "files" "store" "shopify" "wordpress"
-    "mobile" "old" "new" "beta" "alpha" "demo" "wiki" "git"
-)
+# Load common subdomains list directly into memory
+echo "Loading common subdomains list into memory..."
+COMMON_SUBDOMAINS=()
+if command -v curl >/dev/null 2>&1; then
+    # Download and process the list directly into the array
+    while IFS= read -r subdomain || [ -n "$subdomain" ]; do
+        # Skip empty lines and comments
+        if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
+            COMMON_SUBDOMAINS+=("$subdomain")
+        fi
+    done < <(curl -s "$SUBDOMAINS_URL")
+    echo "Loaded ${#COMMON_SUBDOMAINS[@]} subdomains into memory"
+fi
 
 # Function to query DNS records
 query_records() {
@@ -107,14 +107,41 @@ check_domain() {
     echo " [Done]"
 }
 
+# Function to check special email-related subdomains
+check_special_subdomains() {
+    local base_domain="$1"
+    local subdomain_name="$2"
+    local temp_file="$3"
+
+    # Always check _dmarc for the current domain
+    dmarc_domain="_dmarc.$base_domain"
+    query_records "$dmarc_domain" "TXT" "$temp_file"
+
+    # Check _domainkey in the format subdomain._domainkey.parent_domain
+    if [ -n "$subdomain_name" ]; then
+        # Extract parent domain (remove the subdomain part)
+        parent_domain=$(echo "$base_domain" | sed "s/^$subdomain_name\.//")
+        domainkey_domain="${subdomain_name}._domainkey.$parent_domain"
+
+        query_records "$domainkey_domain" "TXT" "$temp_file"
+        query_records "$domainkey_domain" "CNAME" "$temp_file"
+    else
+        # For root domain, check _domainkey at the domain level
+        domainkey_domain="_domainkey.$base_domain"
+        query_records "$domainkey_domain" "TXT" "$temp_file"
+        query_records "$domainkey_domain" "CNAME" "$temp_file"
+    fi
+}
+
 # Main script
 echo "Starting DNS check for $DOMAIN"
 echo "--------------------------------"
 
 # Check the main domain (always check all records)
 check_domain "$DOMAIN" "0" "$TEMP_FILE"
+check_special_subdomains "$DOMAIN" "" "$TEMP_FILE"  # Empty subdomain name for root domain
 
-# Check common subdomains
+# Check common subdomains from memory
 echo -e "\nChecking common subdomains"
 echo "--------------------------------"
 
@@ -132,6 +159,9 @@ for subdomain in "${COMMON_SUBDOMAINS[@]}"; do
         query_records "$full_domain" "CNAME" "$TEMP_FILE"
         echo " [CNAME found]"
     fi
+
+    # Check special subdomains for this subdomain
+    check_special_subdomains "$full_domain" "$subdomain" "$TEMP_FILE"
 done
 
 echo -e "\nChecked $common_sub_count common subdomains"
@@ -142,7 +172,7 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
     echo "--------------------------------"
 
     if [ -f "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
-        file_sub_count=0
+        local file_sub_count=0
         while IFS= read -r subdomain || [ -n "$subdomain" ]; do
             # Skip empty lines and comments
             if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
@@ -166,6 +196,9 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
                     query_records "$full_domain" "CNAME" "$TEMP_FILE"
                     echo " [CNAME found]"
                 fi
+
+                # Check special subdomains for this subdomain
+                check_special_subdomains "$full_domain" "$subdomain" "$TEMP_FILE"
             fi
         done < "$ADDITIONAL_SUBDOMAINS_FILE"
 
@@ -180,7 +213,7 @@ if [ "$#" -gt 0 ]; then
     echo -e "\nChecking additional subdomains from command line"
     echo "--------------------------------"
 
-    arg_sub_count=0
+    local arg_sub_count=0
     for subdomain in "$@"; do
         full_domain="$subdomain.$DOMAIN"
         ((arg_sub_count++))
@@ -200,6 +233,9 @@ if [ "$#" -gt 0 ]; then
             query_records "$full_domain" "CNAME" "$TEMP_FILE"
             echo " [CNAME found]"
         fi
+
+        # Check special subdomains for this subdomain
+        check_special_subdomains "$full_domain" "$subdomain" "$TEMP_FILE"
     done
 
     echo -e "\nChecked $arg_sub_count additional subdomains from command line"
