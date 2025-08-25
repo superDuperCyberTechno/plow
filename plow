@@ -1,19 +1,20 @@
 #!/bin/bash
 
-# Check if domain and input file are provided
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <domain> <subdomains_file>"
+# Check if domain is provided
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: $0 <domain> [subdomains_file]"
+    echo "Example: $0 example.com"
     echo "Example: $0 example.com subdomains.txt"
     exit 1
 fi
 
 DOMAIN="$1"
-SUBDOMAINS_FILE="$2"
+SUBDOMAINS_FILE="${2:-}"
 OUTPUT_FILE="${DOMAIN}_zonefile.txt"
 TEMP_FILE="/tmp/dns_check_$$"
 
 # Record types to check (CNAME first for optimization)
-RECORD_TYPES=("CNAME" "A" "AAAA" "MX" "TXT" "SRV" "NS")
+RECORD_TYPES=("CNAME" "MX" "TXT" "A" "AAAA" "SRV" "NS")
 
 # Function to query DNS records
 query_records() {
@@ -87,35 +88,39 @@ echo "--------------------------------"
 # Check the main domain (always check all records)
 check_domain "$DOMAIN" "0" "$TEMP_FILE"
 
-# Check subdomains from file
-if [ -f "$SUBDOMAINS_FILE" ]; then
+# Check subdomains from file if provided
+if [ -n "$SUBDOMAINS_FILE" ]; then
     echo -e "\nChecking subdomains from $SUBDOMAINS_FILE"
     echo "--------------------------------"
 
-    local sub_count=0
-    while IFS= read -r subdomain || [ -n "$subdomain" ]; do
-        # Skip empty lines and comments
-        if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
-            # Remove any trailing dot and whitespace
-            subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
-            full_domain="$subdomain.$DOMAIN"
-            ((sub_count++))
+    if [ -f "$SUBDOMAINS_FILE" ]; then
+        local sub_count=0
+        while IFS= read -r subdomain || [ -n "$subdomain" ]; do
+            # Skip empty lines and comments
+            if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
+                # Remove any trailing dot and whitespace
+                subdomain=$(echo "$subdomain" | sed 's/[[:space:].]*$//')
+                full_domain="$subdomain.$DOMAIN"
+                ((sub_count++))
 
-            # Check if this is a CNAME first
-            if ! has_cname "$full_domain"; then
-                check_domain "$full_domain" "1" "$TEMP_FILE"
-            else
-                # Only add CNAME record for subdomains
-                echo -n "Checking $full_domain..."
-                query_records "$full_domain" "CNAME" "$TEMP_FILE"
-                echo " [CNAME found]"
+                # Check if this is a CNAME first
+                if ! has_cname "$full_domain"; then
+                    check_domain "$full_domain" "1" "$TEMP_FILE"
+                else
+                    # Only add CNAME record for subdomains
+                    echo -n "Checking $full_domain..."
+                    query_records "$full_domain" "CNAME" "$TEMP_FILE"
+                    echo " [CNAME found]"
+                fi
             fi
-        fi
-    done < "$SUBDOMAINS_FILE"
+        done < "$SUBDOMAINS_FILE"
 
-    echo -e "\nChecked $sub_count subdomains"
+        echo -e "\nChecked $sub_count subdomains"
+    else
+        echo "Subdomains file not found at $SUBDOMAINS_FILE"
+    fi
 else
-    echo -e "\nNo subdomains file found at $SUBDOMAINS_FILE"
+    echo -e "\nNo subdomains file provided, checking main domain only"
 fi
 
 # Process the temp file to remove duplicates and empty lines
@@ -145,5 +150,3 @@ rm -f "$TEMP_FILE"
 
 echo -e "\nDNS records have been saved to $OUTPUT_FILE"
 echo "Note: Subdomains with CNAME records were not checked for other record types"
-
-
