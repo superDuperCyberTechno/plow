@@ -27,10 +27,11 @@ Examples:
 
 ## Requirements
 
-- Bash shell
-- `dig` command (from bind-utils package)
+- Bash-compatible shell
+- `dig` to actually get the DNS records
+- `curl` to download the common_subdomains.txt file for a broad spectrum scrape
 
-## Installation
+## Installation/update
 
    ```bash
    wget https://raw.githubusercontent.com/superDuperCyberTechno/plow/refs/heads/main/plow && chmod +x plow && sudo mv plow /usr/local/bin
