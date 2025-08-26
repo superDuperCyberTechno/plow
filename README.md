@@ -8,6 +8,22 @@ I was sick and tired of moving DNS records around manually when moving domains a
 - Outputs results in BIND-compatible zone file
 - Automatically checks 50+ common subdomains (including single letters and numbers)
 - Supports additional subdomains from file or the CLI directly
+- Checks _dmarc and _domainkey subdomains
+
+## Usage
+
+```
+Usage: plow [-q|--quick] <domain> [additional_subdomains...]
+Usage: plow [-q|--quick] <domain> [@subdomains_file] [additional_subdomains...]
+Options:
+  -q, --quick    Skip checking common subdomains list
+Examples:
+  plow example.com
+  plow --quick example.com
+  plow example.com @subdomains.txt
+  plow -q example.com api blog shop
+```
+
 
 ## Requirements
 

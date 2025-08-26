@@ -2,14 +2,32 @@
 
 # Check if domain is provided
 if [ "$#" -lt 1 ]; then
-    echo "Usage: $0 <domain> [additional_subdomains...]"
-    echo "Usage: $0 <domain> [@subdomains_file] [additional_subdomains...]"
-    echo "Example: $0 example.com"
-    echo "Example: $0 example.com @subdomains.txt"
-    echo "Example: $0 example.com api blog shop"
-    echo "Example: $0 example.com @subdomains.txt api blog"
+    echo "Usage: plow [-q|--quick] <domain> [additional_subdomains...]"
+    echo "Usage: plow [-q|--quick] <domain> [@subdomains_file] [additional_subdomains...]"
+    echo "Options:"
+    echo "  -q, --quick    Skip checking common subdomains list"
+    echo "Examples:"
+    echo "  plow example.com"
+    echo "  plow --quick example.com"
+    echo "  plow example.com @subdomains.txt"
+    echo "  plow -q example.com api blog shop"
     exit 1
 fi
+
+# Process options
+QUICK_MODE=false
+while [[ "$1" =~ ^- ]]; do
+    case "$1" in
+        -q|--quick)
+            QUICK_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 DOMAIN="$1"
 shift  # Remove domain from arguments
@@ -28,18 +46,19 @@ SUBDOMAINS_URL="https://raw.githubusercontent.com/superDuperCyberTechno/plow/ref
 # Record types to check (CNAME first for optimization)
 RECORD_TYPES=("CNAME" "MX" "TXT" "A" "AAAA" "SRV" "NS")
 
-# Load common subdomains list directly into memory
-echo "Loading common subdomains list into memory..."
-COMMON_SUBDOMAINS=()
-if command -v curl >/dev/null 2>&1; then
-    # Download and process the list directly into the array
-    while IFS= read -r subdomain || [ -n "$subdomain" ]; do
-        # Skip empty lines and comments
-        if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
-            COMMON_SUBDOMAINS+=("$subdomain")
-        fi
-    done < <(curl -s "$SUBDOMAINS_URL")
-    echo "Loaded ${#COMMON_SUBDOMAINS[@]} subdomains into memory"
+# Load common subdomains list directly into memory unless in quick mode
+if [ "$QUICK_MODE" = false ]; then
+    COMMON_SUBDOMAINS=()
+    if command -v curl >/dev/null 2>&1; then
+        # Download and process the list directly into the array
+        while IFS= read -r subdomain || [ -n "$subdomain" ]; do
+            # Skip empty lines and comments
+            if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
+                COMMON_SUBDOMAINS+=("$subdomain")
+            fi
+        done < <(curl -s "$SUBDOMAINS_URL")
+        echo "Loaded ${#COMMON_SUBDOMAINS[@]} subdomains into memory"
+    fi
 fi
 
 # Function to query DNS records
@@ -104,7 +123,7 @@ check_domain() {
             query_records "$domain" "$type" "$temp_file"
         fi
     done
-    echo " [Done]"
+    echo "[Done]"
 }
 
 # Function to check special email-related subdomains
@@ -141,30 +160,32 @@ echo "--------------------------------"
 check_domain "$DOMAIN" "0" "$TEMP_FILE"
 check_special_subdomains "$DOMAIN" "" "$TEMP_FILE"  # Empty subdomain name for root domain
 
-# Check common subdomains from memory
-echo -e "\nChecking common subdomains"
-echo "--------------------------------"
+# Check common subdomains from memory unless in quick mode
+if [ "$QUICK_MODE" = false ]; then
+    echo -e "\nChecking common subdomains"
+    echo "--------------------------------"
 
-common_sub_count=0
-for subdomain in "${COMMON_SUBDOMAINS[@]}"; do
-    full_domain="$subdomain.$DOMAIN"
-    ((common_sub_count++))
+    common_sub_count=0
+    for subdomain in "${COMMON_SUBDOMAINS[@]}"; do
+        full_domain="$subdomain.$DOMAIN"
+        ((common_sub_count++))
 
-    # Check if this is a CNAME first
-    if ! has_cname "$full_domain"; then
-        check_domain "$full_domain" "1" "$TEMP_FILE"
-    else
-        # Only add CNAME record for subdomains
-        echo -n "Checking $full_domain..."
-        query_records "$full_domain" "CNAME" "$TEMP_FILE"
-        echo " [CNAME found]"
-    fi
+        # Check if this is a CNAME first
+        if ! has_cname "$full_domain"; then
+            check_domain "$full_domain" "1" "$TEMP_FILE"
+        else
+            # Only add CNAME record for subdomains
+            echo -n "Checking $full_domain..."
+            query_records "$full_domain" "CNAME" "$TEMP_FILE"
+            echo " [CNAME found]"
+        fi
 
-    # Check special subdomains for this subdomain
-    check_special_subdomains "$full_domain" "$subdomain" "$TEMP_FILE"
-done
+        # Check special subdomains for this subdomain
+        check_special_subdomains "$full_domain" "$subdomain" "$TEMP_FILE"
+    done
 
-echo -e "\nChecked $common_sub_count common subdomains"
+    echo -e "\nChecked $common_sub_count common subdomains"
+fi
 
 # Check additional subdomains from file if provided
 if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
@@ -172,7 +193,7 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
     echo "--------------------------------"
 
     if [ -f "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
-        local file_sub_count=0
+        file_sub_count=0
         while IFS= read -r subdomain || [ -n "$subdomain" ]; do
             # Skip empty lines and comments
             if [[ -n "$subdomain" && ! "$subdomain" =~ ^[[:space:]]*# ]]; then
@@ -181,8 +202,8 @@ if [ -n "$ADDITIONAL_SUBDOMAINS_FILE" ]; then
                 full_domain="$subdomain.$DOMAIN"
                 ((file_sub_count++))
 
-                # Skip if this is already in our common subdomains list
-                if printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
+                # Skip if this is already in our common subdomains list (when not in quick mode)
+                if [ "$QUICK_MODE" = false ] && printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
                     echo "Skipping $full_domain (already in common subdomains list)"
                     continue
                 fi
@@ -213,13 +234,13 @@ if [ "$#" -gt 0 ]; then
     echo -e "\nChecking additional subdomains from command line"
     echo "--------------------------------"
 
-    local arg_sub_count=0
+    arg_sub_count=0
     for subdomain in "$@"; do
         full_domain="$subdomain.$DOMAIN"
         ((arg_sub_count++))
 
-        # Skip if this is already in our common subdomains list
-        if printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
+        # Skip if this is already in our common subdomains list (when not in quick mode)
+        if [ "$QUICK_MODE" = false ] && printf '%s\n' "${COMMON_SUBDOMAINS[@]}" | grep -q "^$subdomain$"; then
             echo "Skipping $full_domain (already in common subdomains list)"
             continue
         fi
@@ -230,7 +251,7 @@ if [ "$#" -gt 0 ]; then
         else
             # Only add CNAME record for subdomains
             echo -n "Checking $full_domain..."
-            query_records "$full_domain" "CNAME" "$TEMP_FILE"
+            query_records "$full_domain" "CNAME" "$temp_file"
             echo " [CNAME found]"
         fi
 
@@ -242,12 +263,10 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # Process the temp file to remove duplicates and empty lines
-echo -e "\nProcessing results..."
 sort -u "$TEMP_FILE" | grep -v "^$" > "${TEMP_FILE}.processed"
 mv "${TEMP_FILE}.processed" "$TEMP_FILE"
 
 # Add zone file header
-echo -e "\nGenerating zone file..."
 {
     echo "; BIND zone file for $DOMAIN"
     echo "; Generated on $(date)"
@@ -267,4 +286,9 @@ echo -e "\nGenerating zone file..."
 rm -f "$TEMP_FILE"
 
 echo -e "\nDNS records have been saved to $OUTPUT_FILE"
-echo "Note: Subdomains with CNAME records were not checked for other record types"
+
+if [ "$QUICK_MODE" = true ]; then
+    echo "Note: Quick mode was used - common subdomains were not checked"
+else
+    echo "Note: Subdomains with CNAME records were not checked for other record types"
+fi
