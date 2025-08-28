@@ -4,6 +4,8 @@ I was sick and tired of moving DNS records around manually when moving domains a
 
 **Disclaimer**: The vast majority of this codebase is AI-generated.
 
+Any and all pull requests are welcome.
+
 ## Features
 
 - Checks A, AAAA, MX, TXT, SRV, NS, and CNAME records
