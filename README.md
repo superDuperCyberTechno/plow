@@ -1,6 +1,8 @@
 # Plow
 
-I was sick and tired of moving DNS records around manually when moving domains and name servers. I finally caved in and made this little tool. Feed this thing a domain and it will scrape all the DNS records and cram them into a BIND-valid zone file so you can simply import *that* without fiddling with all this crap.
+I was sick and tired of moving DNS records around manually when moving domains and name servers. I finally caved in and concocted this little tool. Feed this thing a domain and it will scrape all the DNS records and cram them into a BIND-valid zone file so you can simply import *that* without fiddling with all this crap.
+
+**Disclaimer**: The vast majority of this codebase is AI-generated.
 
 ## Features
 
@@ -23,7 +25,6 @@ Examples:
   plow example.com @subdomains.txt
   plow -q example.com api blog shop
 ```
-
 
 ## Requirements
 
